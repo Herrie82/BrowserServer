@@ -25,18 +25,15 @@ class SSLSupport
 {
 public:
 
-    static unsigned long getThreadID(void);
-    static void lock(int lockingMode, int lockNumber, const char *,int);
     static void init(void);
     static void deinit(void);
 
 private:
 
-    static pthread_mutex_t s_initLock; 
+    static pthread_mutex_t s_initLock;
     static int s_initCounter;
 
-    static pthread_mutex_t *s_mutexArray;
-    static long s_nLocks;
+    // Removed: s_mutexArray, s_nLocks, getThreadID(), lock() - no longer needed in OpenSSL 1.1.0+
 
 };
 

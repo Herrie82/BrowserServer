@@ -49,6 +49,7 @@ LICENSE@@@ */
 
 #include "qwebkitplatformplugin.h"
 #include "WebOSPlatformPlugin.h"
+#include <webkit/webos_compat.h>
 #include <QtCore/QSettings>
 
 #ifdef USE_CERT_MGR
@@ -198,7 +199,7 @@ BrowserServer::webKitInitialized() const
 
 void BrowserServer::initPlatformPlugin()
 {
-    QWebKitPlatformPlugin* plugin = QWebPage::platformPlugin();
+    QWebKitPlatformPlugin* plugin = WEBOS_PLATFORM_PLUGIN();
     if (!plugin)
         return;
 

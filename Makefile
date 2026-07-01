@@ -51,7 +51,8 @@ INCLUDES := \
 	-I$(INCLUDE_DIR)/QtGui \
 	-I$(INCLUDE_DIR)/QtNetwork \
 	$(shell pkg-config --cflags glib-2.0) \
-	$(shell pkg-config --cflags luna-service2)
+	$(shell pkg-config --cflags luna-service2) \
+	-I/home/herrie/webos/touchpad-kernel/doctor305/OpenSSL-11-Update/openssl-1.1.1w/include
 
 LIBS := \
     $(LIBAFFINITY) \
@@ -61,6 +62,7 @@ LIBS := \
 	-lpbnjson_cpp \
 	$(LIBCERTMGR) \
         -lrt \
+	-L/home/herrie/webos/touchpad-kernel/doctor305/OpenSSL-11-Update/openssl-1.1.1w \
         -lcrypto \
         -lQtCore \
         -ldl \

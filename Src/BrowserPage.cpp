@@ -38,6 +38,7 @@ LICENSE@@@ */
 
 #include <qpersistentcookiejar.h>
 #include <qwebevent.h>
+#include <webkit/webos_compat.h>
 #include <pbnjson.hpp>
 #include <syslog.h>
 
@@ -1093,7 +1094,7 @@ BrowserPage::holdAt(uint32_t contentsPosX, uint32_t contentsPosY)
     clientPointToServer(contentsPosX, contentsPosY);
     BDBG("Hold mapped to %dx%d", contentsPosX, contentsPosY);
 
-    if(hitResult.isTextNode() || hitResult.isContentEditable()) {
+    if(WEBOS_IS_TEXT_NODE(hitResult) || hitResult.isContentEditable()) {
         QMouseEvent doubleClickEvent(QEvent::MouseButtonDblClick, QPoint(contentsPosX, contentsPosY), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
         bool handledHold = QCoreApplication::sendEvent(m_graphicsView->viewport(), &doubleClickEvent);
         return handledHold;
@@ -1286,9 +1287,9 @@ BrowserPage::isInteractiveAtPoint( uint32_t x, uint32_t y )
 
 void BrowserPage::getTextCaretBounds(int& left, int& top, int& right, int& bottom)
 {
-    if (m_webView) {
+    if (m_webPage) {
         QRect boundingRect;
-        m_webView->page()->getTextCaretPos(boundingRect);
+        m_webPage->getTextCaretPos(boundingRect);
         left = boundingRect.left();
         top = boundingRect.top();
         right = boundingRect.right();

@@ -23,14 +23,13 @@ LICENSE@@@ */
 #include <regex.h>
 #include <glib.h>
 #include <string>
+#include <list>
 #include <set>
 #include <vector>
 #include <weboswebpage.h>
+#include <InteractiveRectType.h>
 
-#include <QRegion>
 #include <QtWebKit/QtWebKit>
-#include <QGraphicsView>
-#include <QGraphicsPixmapItem>
 
 #include "BrowserRect.h"
 #include "BrowserOffscreenQt.h"

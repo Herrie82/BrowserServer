@@ -26,22 +26,7 @@ LICENSE@@@ */
 //static initializers here
 pthread_mutex_t SSLSupport::s_initLock = PTHREAD_MUTEX_INITIALIZER;
 int SSLSupport::s_initCounter = 0;
-pthread_mutex_t * SSLSupport::s_mutexArray = NULL;
-long SSLSupport::s_nLocks = 0;
-
-unsigned long SSLSupport::getThreadID(void)
-{
-    return ((unsigned long) pthread_self());
-}
-
-void SSLSupport::lock(int lockingMode, int lockNumber, const char *,int)
-{
-    if (lockingMode & CRYPTO_LOCK) {
-        pthread_mutex_lock(&s_mutexArray[lockNumber]);
-    } else {
-        pthread_mutex_unlock(&s_mutexArray[lockNumber]);
-    }
-}
+// Removed: s_mutexArray, s_nLocks, getThreadID(), lock() - no longer needed in OpenSSL 1.1.0+
 
 void SSLSupport::init(void)
 {
@@ -53,22 +38,15 @@ void SSLSupport::init(void)
     }
     ++s_initCounter;
 
+    // OpenSSL 3.x: These are now no-ops but safe to call
     SSL_load_error_strings();                /* readable error messages */
     SSL_library_init();                      /* initialize library */
     OpenSSL_add_all_ciphers();
     OpenSSL_add_all_digests();
     ERR_load_crypto_strings();
-    s_nLocks = CRYPTO_num_locks();
 
-    s_mutexArray = (pthread_mutex_t*) OPENSSL_malloc(s_nLocks * sizeof(pthread_mutex_t));
-
-    for (int i = 0; i < s_nLocks; i++) 
-    {
-        pthread_mutex_init(&s_mutexArray[i], NULL);
-    }
-
-    CRYPTO_set_id_callback(getThreadID);
-    CRYPTO_set_locking_callback(lock);
+    // Threading is now handled internally by OpenSSL 1.1.0+
+    // Removed: CRYPTO_num_locks, CRYPTO_set_id_callback, CRYPTO_set_locking_callback
 
     pthread_mutex_unlock(&s_initLock);
 }
@@ -83,14 +61,9 @@ void SSLSupport::deinit(void)
         return;
     }
     --s_initCounter;
-    CRYPTO_set_locking_callback(NULL);
 
-    for (int i = 0; i < s_nLocks; i++) {
-        pthread_mutex_destroy(&s_mutexArray[i]);
-    }
-
-    OPENSSL_free(s_mutexArray);
-    CRYPTO_set_id_callback(NULL);
+    // Threading cleanup no longer needed in OpenSSL 1.1.0+
+    // Removed: CRYPTO_set_locking_callback, mutex cleanup, CRYPTO_set_id_callback
 
     pthread_mutex_unlock(&s_initLock);
 }

@@ -1,0 +1,177 @@
+# Cross-compilation Makefile for BrowserServer
+# For HP TouchPad with OpenSSL 1.1.1w
+
+BUILD_TYPE := release
+PLATFORM   := arm
+
+# Paths - adjust as needed
+BUILD_DEPS := /home/herrie/webos/touchpad-kernel/doctor305/build-deps
+ROOTFS := /home/herrie/webos/touchpad-kernel/doctor305/untouched-rootfs
+OPENSSL_DIR := /home/herrie/webos/touchpad-kernel/doctor305/OpenSSL-11-Update/openssl-1.1.1w
+
+# Cross compiler
+CROSS_COMPILE := /opt/PalmPDK/arm-gcc/bin/arm-none-linux-gnueabi-
+CC := $(CROSS_COMPILE)gcc
+CXX := $(CROSS_COMPILE)g++
+AR := $(CROSS_COMPILE)ar
+STRIP := $(CROSS_COMPILE)strip
+
+# MOC tool (Qt 4.8.7 moc from source tree)
+MOC := $(BUILD_DEPS)/qt-everywhere-opensource-src-4.8.7/bin/moc
+
+# Staging paths
+STAGING_INCDIR := $(BUILD_DEPS)/staging/include
+STAGING_LIBDIR := $(BUILD_DEPS)/staging/lib
+INCLUDE_DIR := $(STAGING_INCDIR)
+
+# Source conditionals
+SSL_SUPPORT_SOURCE := SSLSupport.cpp
+BACKUP_MANAGER_SOURCE :=
+CPU_AFFINITY_SOURCE :=
+LIBAFFINITY :=
+LIBCERTMGR :=
+LIBMEMCHUTE :=
+
+# Include paths - explicit, no pkg-config
+INCLUDES := \
+	-isystem $(STAGING_INCDIR)/PmCertificateMgr/IncsPublic \
+	-isystem $(STAGING_INCDIR)/webkit \
+	-I./Src \
+	-I./Yap \
+	-I$(STAGING_INCDIR)/WebKitSupplemental \
+	-I$(STAGING_INCDIR) \
+	-I$(STAGING_INCDIR)/ime \
+	-I$(STAGING_INCDIR)/QtWebKit \
+	-I$(STAGING_INCDIR)/sysmgr-ipc \
+	-I$(STAGING_INCDIR)/luna-service2 \
+	-I$(INCLUDE_DIR) \
+	-I$(INCLUDE_DIR)/Qt \
+	-I$(INCLUDE_DIR)/QtCore \
+	-I$(INCLUDE_DIR)/QtGui \
+	-I$(INCLUDE_DIR)/QtNetwork \
+	-I/usr/include/glib-2.0 \
+	-I/usr/lib/x86_64-linux-gnu/glib-2.0/include \
+	-I$(OPENSSL_DIR)/include
+
+# Library paths and libraries - explicit, no pkg-config
+# Note: Link directly against libpthread.so.0 to avoid linker script with absolute paths
+PDK_SYSROOT := /opt/PalmPDK/arm-gcc/sysroot
+LIBS := \
+	$(LIBAFFINITY) \
+	$(PDK_SYSROOT)/lib/libpthread.so.0 \
+	$(PDK_SYSROOT)/usr/lib/libpthread_nonshared.a \
+	$(LIBMEMCHUTE) \
+	-lglib-2.0 \
+	$(ROOTFS)/usr/lib/libpbnjson_cpp.so \
+	$(LIBCERTMGR) \
+	-lrt \
+	$(OPENSSL_DIR)/libssl.so.1.1 \
+	$(OPENSSL_DIR)/libcrypto.so.1.1 \
+	-lQtCore \
+	-ldl \
+	-lQtGui \
+	-lQtWebKit \
+	-lQtNetwork \
+	-llunaservice \
+	-lgthread-2.0
+
+# Compiler flags
+# -march=armv7-a: HP TouchPad uses Snapdragon ARMv7 processor
+# QT_ARCH_ARMV6 is needed for correct Qt atomic operations (ARMv6+ supports ldrex/strex)
+FLAGS_OPT := -march=armv7-a -fno-exceptions -fno-rtti -fvisibility=hidden -DDEBUG -fPIC -DTARGET_DEVICE -DBUILD_SSL_SUPPORT -DQT_ARCH_ARMV6
+
+ifeq ("$(BUILD_TYPE)", "debug")
+FLAGS_OPT := -O0 -pg -g $(FLAGS_OPT)
+else
+FLAGS_OPT := -O2 $(FLAGS_OPT)
+endif
+
+LOCAL_CFLAGS := -Wall $(FLAGS_OPT)
+
+# Use PDK sysroot for libc, but add rootfs paths for webOS-specific libraries
+# Note: -lpthread is replaced with direct .so.0 linking due to linker script absolute path issue
+LOCAL_LFLAGS := -L$(PDK_SYSROOT)/lib -L$(PDK_SYSROOT)/usr/lib -L$(STAGING_LIBDIR) -L$(ROOTFS)/usr/lib -L$(ROOTFS)/lib -Wl,-rpath-link,$(ROOTFS)/usr/lib -Wl,-rpath-link,$(ROOTFS)/lib -Wl,-rpath-link,$(PDK_SYSROOT)/lib -Wl,-rpath-link,$(PDK_SYSROOT)/usr/lib $(FLAGS_OPT) $(LIBS)
+
+OBJDIR := $(BUILD_TYPE)-$(PLATFORM)
+
+TARGET_LIB := $(OBJDIR)/libYap.a
+
+LIB_SOURCES := \
+	YapPacket.cpp \
+	YapProxy.cpp \
+	YapServer.cpp \
+	YapClient.cpp \
+	IpcBuffer.cpp \
+	BufferLock.cpp \
+	BrowserRect.cpp \
+	PluginDirWatcher.cpp
+
+TARGET_APP := $(OBJDIR)/BrowserServer
+
+APP_SOURCES := \
+	Main.cpp \
+	BrowserServer.cpp \
+	BrowserPage.cpp \
+	BrowserSyncReplyPipe.cpp \
+	BrowserServerBase.cpp \
+	BrowserOffscreenQt.cpp \
+	BrowserPageManager.cpp \
+	$(BACKUP_MANAGER_SOURCE) \
+	$(CPU_AFFINITY_SOURCE) \
+	Settings.cpp \
+	$(SSL_SUPPORT_SOURCE) \
+	JsonUtils.cpp \
+	BrowserPage.moc.cpp \
+	BrowserComboBox.cpp \
+	BrowserComboBox.moc.cpp \
+	qwebkitplatformplugin.moc.cpp \
+	WebOSPlatformPlugin.moc.cpp
+
+LIB_OBJS := $(LIB_SOURCES:%.cpp=$(OBJDIR)/%.o)
+APP_OBJS := $(APP_SOURCES:%.cpp=$(OBJDIR)/%.o)
+
+SOURCES := $(LIB_SOURCES) $(APP_SOURCES)
+
+all: setup $(TARGET_LIB) $(TARGET_APP)
+
+setup:
+	@mkdir -p $(OBJDIR)
+
+$(TARGET_LIB): $(LIB_OBJS)
+	$(AR) rcs $(TARGET_LIB) $(LIB_OBJS)
+
+$(TARGET_APP): $(APP_OBJS) $(TARGET_LIB)
+	$(CXX) -o $(TARGET_APP) $(APP_OBJS) $(LIB_OBJS) $(LOCAL_LFLAGS)
+
+qwebkitplatformplugin.moc.cpp: $(STAGING_INCDIR)/WebKitSupplemental/qwebkitplatformplugin.h
+	$(MOC) -o $@ $<
+
+WebOSPlatformPlugin.moc.cpp: $(STAGING_INCDIR)/WebKitSupplemental/WebOSPlatformPlugin.h
+	$(MOC) -o $@ $<
+
+BrowserComboBox.moc.cpp: Src/BrowserComboBox.h
+	$(MOC) -o $@ $<
+
+BrowserPage.moc.cpp: Src/BrowserPage.h
+	$(MOC) -o $@ $<
+
+vpath %.cpp Yap Src
+vpath %.h Src
+
+$(OBJDIR)/%.o: %.cpp
+	$(CXX) -MD $(INCLUDES) $(LOCAL_CFLAGS) -c `readlink -fn $<` -o $@
+
+-include $(SOURCES:%.cpp=$(OBJDIR)/%.d)
+
+.PHONY: clean
+clean:
+	rm -rf $(OBJDIR)
+	rm -f BrowserPage.moc.cpp
+	rm -f BrowserComboBox.moc.cpp
+	rm -f qwebkitplatformplugin.moc.cpp
+	rm -f WebOSPlatformPlugin.moc.cpp
+
+.PHONY: install
+install:
+	mkdir -p $(INSTALL_DIR)/usr/bin
+	install -m 0775 $(TARGET_APP) $(INSTALL_DIR)/usr/bin/BrowserServer
