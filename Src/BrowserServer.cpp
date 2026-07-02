@@ -447,11 +447,8 @@ BrowserServer::asyncCmdEnableSelection(YapProxy* proxy, int32_t mouseX, int32_t 
         return;
     }
 
-    pPage->setSelectionMode(true);
-
-    pPage->clickAt(mouseX, mouseY, 1);  // 1 = number of clicks
-
-    pPage->setSelectionMode(false);
+    // WPE: no shift-click selection — select the word of web content at the tapped point via JS.
+    pPage->selectWordAt(mouseX, mouseY);
 
     msgRemoveSelectionReticle(proxy);
 }
@@ -1024,12 +1021,8 @@ BrowserServer::asyncCmdSaveImageAtPoint(YapProxy* proxy, int32_t queryNum, int32
     if (filepath.isEmpty()) {
         filepath = m_defaultDownloadDir;
     }
-    bool succeeded = pPage->saveImageAtPoint(pointX, pointY, filepath);
-    if (!succeeded) {
-        filepath.clear();
-    }
-
-    msgSaveImageAtPointResponse(proxy, queryNum, succeeded, qPrintable(filepath));
+    // WPE: async — page fetches img src, downloads, then invokes msgSaveImageAtPointResponse.
+    pPage->saveImageAtPointAsync(queryNum, pointX, pointY, qPrintable(filepath));
 }
 
 void
@@ -1749,60 +1742,8 @@ void BrowserServer::asyncCmdHitTest(YapProxy *proxy, int32_t queryNum, int32_t c
         return;
     }
 
-    pbnjson::JValue obj = pbnjson::Object();
-    obj.put("x", cx);
-    obj.put("y", cy);
-
-    QWebHitTestResult hitResult = pPage->hitTest(cx, cy);
-    if(!hitResult.isNull()) {
-
-        QWebElement resultElement = hitResult.element();
-        if (resultElement.isNull())
-            resultElement = hitResult.linkElement().isNull() ? hitResult.enclosingBlockElement() : hitResult.linkElement();
-
-        if (!resultElement.isNull()) {
-
-            obj.put("isNull", false);
-            obj.put("element", qPrintable(resultElement.tagName().toLower()));
-            obj.put("editable", hitResult.isContentEditable());
-
-            int sx = pPage->getPageX();
-            int sy = pPage->getPageY();
-            double z = pPage->getZoomLevel();
-            QRect bounds = hitResult.boundingRect();
-
-            pbnjson::JValue boundsObj = pbnjson::Object();
-            boundsObj.put("left", ::round((bounds.x() - sx) * z));
-            boundsObj.put("top", ::round((bounds.y() - sy) * z));
-            boundsObj.put("right", ::round((bounds.x() + bounds.width() - sx) * z));
-            boundsObj.put("bottom", ::round((bounds.y() + bounds.height() - sy) * z));
-
-            obj.put("bounds", boundsObj);
-        }
-
-        if (!hitResult.linkUrl().isEmpty()) {
-            obj.put("isLink", true);
-            obj.put("linkUrl", hitResult.linkUrl().toEncoded().constData());
-            obj.put("linkText", qPrintable(hitResult.linkText()));
-        }
-
-        if (!hitResult.imageUrl().isEmpty()) {
-            obj.put("isImage", true);
-            obj.put("altText", qPrintable(hitResult.alternateText()));
-            obj.put("imageUrl", hitResult.imageUrl().toEncoded().constData());
-        }
-    }
-
-    QSettings settings;
-    QString schemaFile = settings.value("HitTestSchema").toString();
-
-    std::string json;
-    if (!jValueToJsonStringUsingSchemaFile(json, obj, qPrintable(schemaFile))) {
-        BERR("Error generating JSON.\nSchema file: %s", qPrintable(schemaFile));
-    } else {
-        BDBG("Generated JSON:\n %s\n", json.c_str());
-        msgHitTestResponse(proxy, queryNum, json.c_str());
-    }
+    // WPE: async hit-test via JS elementFromPoint; page invokes msgHitTestResponse when done.
+    pPage->hitTestAsync(queryNum, cx, cy);
 }
 
 unsigned char* BrowserServer::getOffscreenBackupBuffer(int bufferSize) {
