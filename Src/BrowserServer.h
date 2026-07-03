@@ -130,7 +130,7 @@ private:
     unsigned char* m_offscreenBackupBuffer;
     int m_offscreenBackupBufferLength;
 
-    BrowserComboBoxList m_comboBoxes;
+    BrowserComboBoxList* m_comboBoxes;   /* WPE: never allocated (BrowserComboBox is excluded; WebKit owns <select>) */
 
     void registerForConnectionManager();
 

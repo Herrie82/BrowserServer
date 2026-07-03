@@ -103,7 +103,10 @@ BrowserServer* BrowserServer::instance()
 }
 
 BrowserServer::BrowserServer()
-    : BrowserServerBase("browser")
+    /* Yap socket name = BROWSERSERVER_NAME env (set by the per-app upstart job: "isisbrowser", "atlas", ...)
+     * so one binary serves multiple side-by-side browser instances on distinct /tmp/yapserver.<name> sockets.
+     * Falls back to "browser" (the stock Palm socket) only if the env is unset. */
+    : BrowserServerBase(::getenv("BROWSERSERVER_NAME") ? ::getenv("BROWSERSERVER_NAME") : "browser")
     , m_pageCount(0)
     , m_networkAccessManager(0)
     , m_cookieJar(0)
@@ -119,7 +122,7 @@ BrowserServer::BrowserServer()
 #endif
     , m_offscreenBackupBuffer(0)
     , m_offscreenBackupBufferLength(0)
-    , m_comboBoxes(*this)
+    , m_comboBoxes(0)
 {
 
     QSettings settings;
@@ -130,8 +133,10 @@ BrowserServer::BrowserServer()
 
     m_networkAccessManager = new QNetworkAccessManager;
 
-    m_cookieJar = new QPersistentCookieJar(m_networkAccessManager, "browser-app");
-    m_networkAccessManager->setCookieJar(m_cookieJar);
+    /* WPE port: WebKit's own network process manages cookies (WebKitCookieManager). The legacy QtWebKit
+     * QNetworkAccessManager/QPersistentCookieJar path is excluded from the build, so leave m_cookieJar null. */
+    /* m_cookieJar = new QPersistentCookieJar(m_networkAccessManager, "browser-app");
+       m_networkAccessManager->setCookieJar(m_cookieJar); */
 
     if (settings.value("CacheEnabled").toBool() && !settings.value("CachePath").toString().isEmpty()) {
         QNetworkDiskCache *diskCache = new QNetworkDiskCache (m_networkAccessManager);
@@ -215,7 +220,8 @@ void BrowserServer::initPlatformPlugin()
     if (!settings)
         return;
 
-    settings->setComboBoxFactory(&m_comboBoxes);
+    /* WPE: WebKit renders <select> popups; no Qt combo-box factory. */
+    /* settings->setComboBoxFactory(&m_comboBoxes); */
 }
 
 bool
@@ -748,12 +754,14 @@ void BrowserServer::asyncCmdClearCache(YapProxy* proxy)
 void BrowserServer::asyncCmdClearCookies(YapProxy* proxy)
 {
     webkitInit();
-    m_cookieJar->clearCookies();
+    if (m_cookieJar) m_cookieJar->clearCookies();   /* WPE: cookies owned by WebKit network process */
 }
 
 void BrowserServer::asyncCmdPopupMenuSelect(YapProxy* proxy, const char* identifier, int32_t selectedIdx)
 {
-    m_comboBoxes.selectItem(atoi(identifier), selectedIdx);
+    /* WPE port: WebKit renders <select> popups itself; the legacy BrowserComboBox path is excluded. */
+    (void)identifier; (void)selectedIdx;
+    /* m_comboBoxes.selectItem(atoi(identifier), selectedIdx); */
 }
 
 
@@ -793,7 +801,7 @@ void BrowserServer::asyncCmdSetBlockPopups(YapProxy* proxy, bool block)
 
 void BrowserServer::asyncCmdSetAcceptCookies(YapProxy* proxy, bool enable) 
 {
-    m_cookieJar->enableCookies(enable);
+    if (m_cookieJar) m_cookieJar->enableCookies(enable);   /* WPE: WebKit owns cookie policy */
 }
 
 void BrowserServer::asyncCmdSetShowClickedLink(YapProxy* proxy, bool enable) 
@@ -1599,7 +1607,7 @@ BrowserServer::serviceCmdClearCookies(LSHandle *lsHandle, LSMessage *message, vo
 {
     bool success = false;
     if (instance() && instance()->webkitInit()) {
-        instance()->m_cookieJar->clearCookies();
+        if (instance()->m_cookieJar) instance()->m_cookieJar->clearCookies();   /* WPE: WebKit owns cookies */
         success = true;
     }
 

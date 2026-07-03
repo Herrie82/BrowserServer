@@ -47,8 +47,8 @@ bool InitSettings()
     map.insert("WebSettings/WebGLEnabled", true);
     map.insert("WebSettings/FullScreenEnabled", true);
 
-#ifdef ISIS_DESKTOP
-    QString root = QString("%1/.isis").arg(QDir::homePath());
+#ifdef ATLAS_DESKTOP
+    QString root = QString("%1/.atlas").arg(QDir::homePath());
 
     map.insert("CachePath", root + "/cache");
     map.insert("CookieJarPath", root + "/cookies");
