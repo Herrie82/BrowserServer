@@ -384,8 +384,17 @@ void YapServer::ioCallback(GIOChannel* channel, GIOCondition condition)
         goto Detached;
     }
     msgSocketPathLen = bswap_16(msgSocketPathLen);
-
+    /* msgSocketPathLen is signed int16: reject negatives (a hostile/corrupt 0xFFFF became -1, which made
+     * malloc(0) then wrote msgSocketPath[-1] out of bounds) and cap to a sane socket-path length. */
+    if (msgSocketPathLen < 0 || msgSocketPathLen > 4096) {
+        fprintf(stderr, "YAP: bad message socket name length %d\n", msgSocketPathLen);
+        goto Detached;
+    }
     msgSocketPath = (char*) malloc(msgSocketPathLen + 1);
+    if (!msgSocketPath) {
+        fprintf(stderr, "YAP: OOM allocating message socket name\n");
+        goto Detached;
+    }
     if (!readSocket(socketFd, msgSocketPath, msgSocketPathLen)) {
         fprintf(stderr, "YAP: Failed to read message socket name\n");
         goto Detached;
@@ -399,8 +408,15 @@ void YapServer::ioCallback(GIOChannel* channel, GIOCondition condition)
         goto Detached;
     }
     msgSocketPostfixLen = bswap_16(msgSocketPostfixLen);
-
+    if (msgSocketPostfixLen < 0 || msgSocketPostfixLen > 4096) {
+        fprintf(stderr, "YAP: bad message socket postfix length %d\n", msgSocketPostfixLen);
+        goto Detached;
+    }
     msgSocketPostfix = (char*) malloc(msgSocketPostfixLen + 1);
+    if (!msgSocketPostfix) {
+        fprintf(stderr, "YAP: OOM allocating message socket postfix\n");
+        goto Detached;
+    }
     if (!readSocket(socketFd, msgSocketPostfix, msgSocketPostfixLen)) {
         fprintf(stderr, "YAP: Failed to read message postifx name\n");
         goto Detached;

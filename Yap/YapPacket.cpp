@@ -399,7 +399,9 @@ void YapPacket::operator>>(char*& val)
     m_currReadPos += 3;
 
     g_return_if_fail(strLen >= 0 && (m_currReadPos + strLen) <= m_readTotalLen);
-    val = (char*) malloc(strLen + 1);
+    char* strBuf = (char*) malloc(strLen + 1);
+    g_return_if_fail(strBuf != NULL);   // leave the out-param unchanged on OOM (caller pre-inits to 0)
+    val = strBuf;
 
     memcpy(val, m_buffer + m_currReadPos, strLen);
     val[strLen] = 0;

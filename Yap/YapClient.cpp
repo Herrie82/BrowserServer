@@ -450,7 +450,11 @@ void YapClient::ioCallback(GIOChannel* channel, GIOCondition condition)
     }
 
     if (channel == d->msgServerIoChannel) {
-        // Server connected to our message socket. Created a new msg socket for it
+        // Server connected to our message socket. Create a new msg socket for it.
+
+        // Tear down any previous msg channel/source/fd first — a second server connection would otherwise
+        // overwrite (and leak) the prior GSource, GIOChannel, and fd.
+        closeMsgSocket();
 
         struct sockaddr_un  socketAddr;
         socklen_t           socketAddrLen;
@@ -459,6 +463,10 @@ void YapClient::ioCallback(GIOChannel* channel, GIOCondition condition)
         memset(&socketAddrLen, 0, sizeof(socketAddrLen));
 
         d->msgSocketFd = ::accept(d->msgServerSocketFd, (struct sockaddr*) &socketAddr, &socketAddrLen);
+        if (d->msgSocketFd == -1) {
+            fprintf(stderr, "YAP: accept on message socket failed\n");
+            return;
+        }
 
         // Create a new io channel for the receiving messages from the server
         d->msgIoChannel = g_io_channel_unix_new(d->msgSocketFd);
