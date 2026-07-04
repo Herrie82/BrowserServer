@@ -49,24 +49,34 @@ public:
 
 private:
 
-    // Write only packet
-    YapPacket(uint8_t* buffer);
-    // Read only packet
+    // Write only packet — self-allocates a growable heap buffer (starts at kInitMsgLen, grows to kMaxMsgLen)
+    YapPacket();
+    // Read only packet — wraps an external buffer owned by YapProxy/YapClient
     YapPacket(uint8_t* buffer, int readTotalLen);
 
-    ~YapPacket() {}
+    ~YapPacket();
 
     void setReadTotalLength(int len);
+    // Re-point a read packet at a (possibly reallocated/grown) external receive buffer.
+    void setReadBuffer(uint8_t* buffer, int totalLen);
+    // Accessor so the owner can send the (possibly grown) write buffer over the socket.
+    uint8_t* buffer() const { return m_buffer; }
     void reset();
+
+    // Grow the (owned) write buffer so `extra` more bytes fit, capped at kMaxMsgLen. Returns false if the
+    // packet doesn't own its buffer or the cap would be exceeded / realloc fails.
+    bool ensureCapacity(int extra);
 
     YapPacket(const YapPacket&);
     YapPacket& operator=(const YapPacket&);
-    
+
     uint8_t* m_buffer;
     bool  m_forWriting;
     int   m_currReadPos;
     int   m_readTotalLen;
     int   m_currWritePos;
+    int   m_capacity;      // allocated size of m_buffer when owned (write packets)
+    bool  m_ownsBuffer;    // true for write packets (heap-allocated here), false for read packets (external)
 
     friend class YapProxy;
     friend class YapClient;

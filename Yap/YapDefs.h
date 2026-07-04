@@ -21,7 +21,8 @@ LICENSE@@@ */
 
 #include <stdint.h>
 
-#define kMaxMsgLen              ((int)16384) // increased to 16k up from 4k
+#define kMaxMsgLen              ((int)(512*1024)) // HARD CAP; buffers grow dynamically up to this (was fixed 16k)
+#define kInitMsgLen             ((int)16384)      // initial/default buffer size — grows on demand toward kMaxMsgLen
 
 #define kPacketFlagSyncMask     ((uint8_t)(1 << 0))
 #define kPacketFlagCommandMask  ((uint8_t)(1 << 1))

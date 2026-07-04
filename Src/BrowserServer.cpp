@@ -459,6 +459,19 @@ BrowserServer::asyncCmdEnableSelection(YapProxy* proxy, int32_t mouseX, int32_t 
     msgRemoveSelectionReticle(proxy);
 }
 
+void
+BrowserServer::asyncCmdExtendSelection(YapProxy* proxy, int32_t whichEnd, int32_t mouseX, int32_t mouseY)
+{
+    BrowserPage* pPage = static_cast<BrowserPage*>(proxy->privateData());
+    if (!pPage) {
+        BERR("No page for this client.");
+        return;
+    }
+
+    // Dragging a selection marker: extend the existing selection to this point (whichEnd fixes the anchor).
+    pPage->extendSelectionTo(whichEnd, mouseX, mouseY);
+}
+
 /**
  * Called on mouse up when in selection mode
  *

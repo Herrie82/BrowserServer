@@ -143,6 +143,7 @@ protected:
     virtual void asyncCmdIsEditing(YapProxy* proxy, int32_t queryNum) = 0;
     virtual void asyncCmdInsertStringAtCursor(YapProxy* proxy, const char* text) = 0;
     virtual void asyncCmdEnableSelection(YapProxy* proxy, int32_t pointX, int32_t pointY) = 0;
+    virtual void asyncCmdExtendSelection(YapProxy* proxy, int32_t whichEnd, int32_t pointX, int32_t pointY) = 0;
     virtual void asyncCmdDisableSelection(YapProxy* proxy) = 0;
     virtual void asyncCmdSaveImageAtPoint(YapProxy* proxy, int32_t queryNum, int32_t pointX, int32_t pointY, const char* dstDir) = 0;
     virtual void asyncCmdGetImageInfoAtPoint(YapProxy* proxy, int32_t queryNum, int32_t pointX, int32_t pointY) = 0;

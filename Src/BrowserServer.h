@@ -165,6 +165,7 @@ private:
     virtual void asyncCmdSetMinFontSize(YapProxy* proxy, int32_t minFontSizePt);
     virtual void asyncCmdFindString(YapProxy* proxy, const char* str, bool fwd);
     virtual void asyncCmdEnableSelection(YapProxy* proxy, int32_t mouseX, int32_t mouseY);
+    virtual void asyncCmdExtendSelection(YapProxy* proxy, int32_t whichEnd, int32_t mouseX, int32_t mouseY);
     virtual void asyncCmdDisableSelection(YapProxy* proxy);
     virtual void asyncCmdClearSelection(YapProxy* proxy);
     virtual void asyncCmdSelectAll(YapProxy* proxy);

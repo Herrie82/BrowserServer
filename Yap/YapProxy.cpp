@@ -70,6 +70,7 @@ YapProxy::YapProxy(YapServer* server, int cmdSocketFd, char* msgSocketPath, char
     , m_msgSocketPostfix(0)
     , m_privData(0)
     , m_cmdBuffer(0)
+    , m_cmdBufCap(0)
     , m_replyBuffer(0)
     , m_msgBuffer(0)
     , m_ioChannel(0)
@@ -92,13 +93,14 @@ YapProxy::YapProxy(YapServer* server, int cmdSocketFd, char* msgSocketPath, char
         }
     }
 
-    m_cmdBuffer   = new uint8_t[kMaxMsgLen];
-    m_replyBuffer = new uint8_t[kMaxMsgLen];
-    m_msgBuffer   = new uint8_t[kMaxMsgLen];
+    // Receive buffer starts small and grows on demand (see ioFunction). Write packets own their own
+    // growable buffers, so m_replyBuffer/m_msgBuffer are no longer allocated.
+    m_cmdBuffer   = (uint8_t*) malloc(kInitMsgLen);
+    m_cmdBufCap   = kInitMsgLen;
 
     m_packetCommand = new YapPacket(m_cmdBuffer, 0);
-    m_packetReply   = new YapPacket(m_replyBuffer);
-    m_packetMessage = new YapPacket(m_msgBuffer);
+    m_packetReply   = new YapPacket();
+    m_packetMessage = new YapPacket();
 
     GMainContext* mainCtxt = g_main_loop_get_context(m_server->mainLoop());
 
@@ -170,9 +172,8 @@ YapProxy::~YapProxy()
         g_io_channel_unref(m_ioChannel);
     }
 
-    delete [] m_cmdBuffer;
-    delete [] m_replyBuffer;
-    delete [] m_msgBuffer;
+    if (m_cmdBuffer)
+        free(m_cmdBuffer);   // malloc/realloc'd
 
     delete m_packetCommand;
     delete m_packetReply;
@@ -242,24 +243,24 @@ void YapProxy::setTerminate()
 
 void YapProxy::sendMessage()
 {
-    char     pktHeader[4];
-    uint16_t pktLen = 0;
+    char pktHeader[4];
+    int  pktLen = m_packetMessage->length();
 
-    if (m_packetMessage->length() == 0) {
+    if (pktLen == 0) {
         fprintf(stderr, "Message is empty\n");
         return;
     }
 
-    ::memset(pktHeader, 0, sizeof(pktHeader));
-
-    pktLen = m_packetMessage->length();
-    pktLen = bswap_16(pktLen);
-    ::memcpy(pktHeader, &pktLen, 2);
+    // 24-bit little-endian length in bytes 0..2, flags 0 in byte 3.
+    pktHeader[0] = (char)( pktLen        & 0xFF);
+    pktHeader[1] = (char)((pktLen >> 8)  & 0xFF);
+    pktHeader[2] = (char)((pktLen >> 16) & 0xFF);
+    pktHeader[3] = 0;
 
     if (m_msgSocketFd != -1) {
         bool sent = writeSocket(m_msgSocketFd, pktHeader, 4);
         if (sent) {
-            sent = writeSocket(m_msgSocketFd, (char*) m_msgBuffer, m_packetMessage->length());
+            sent = writeSocket(m_msgSocketFd, (char*) m_packetMessage->buffer(), pktLen);
         }
         if (!sent) {
             fprintf(stderr, "ERROR sending message, errno=%d.", errno);
@@ -267,16 +268,15 @@ void YapProxy::sendMessage()
     }
     else {
         // Save this message for later and send if socket is opened.
-        m_queuedMessages.push(new Message(pktHeader, m_msgBuffer, m_packetMessage->length()));
+        m_queuedMessages.push(new Message(pktHeader, m_packetMessage->buffer(), pktLen));
     }
 }
 
 void YapProxy::ioFunction(GIOChannel* channel, GIOCondition condition)
 {
     char     pktHeader[4] = { 0, 0, 0, 0 };
-    uint16_t pktLen    = 0;
+    uint32_t pktLen    = 0;
     uint8_t  pktFlags  = 0;
-    char * ppp = 0;
 
     if (condition & G_IO_HUP)
         goto Detached;
@@ -286,13 +286,24 @@ void YapProxy::ioFunction(GIOChannel* channel, GIOCondition condition)
         fprintf(stderr, "YAP: Failed to read packet header\n");
         goto Detached;
     }
-    ppp = ((char *)&pktHeader[0]);
-    pktLen   = *((uint16_t*) ppp);
-    pktLen   = bswap_16(pktLen);
+    // 24-bit little-endian length in bytes 0..2, flags in byte 3.
+    pktLen   = (uint32_t)(uint8_t)pktHeader[0] | ((uint32_t)(uint8_t)pktHeader[1] << 8) | ((uint32_t)(uint8_t)pktHeader[2] << 16);
     pktFlags = (pktHeader[3]);
-    if (pktLen > kMaxMsgLen) {
+    if (pktLen > (uint32_t)kMaxMsgLen) {
         fprintf(stderr, "YAP: Invalid message length %u > %d\n", pktLen, kMaxMsgLen);
         goto Detached;
+    }
+
+    // Grow the receive buffer if this packet is bigger than the current allocation.
+    if ((int)pktLen > m_cmdBufCap) {
+        uint8_t* nb = (uint8_t*) realloc(m_cmdBuffer, pktLen);
+        if (!nb) {
+            fprintf(stderr, "YAP: OOM growing command buffer to %u\n", pktLen);
+            goto Detached;
+        }
+        m_cmdBuffer = nb;
+        m_cmdBufCap = (int) pktLen;
+        m_packetCommand->setReadBuffer(m_cmdBuffer, pktLen);
     }
 
     // Get the packet data
@@ -311,9 +322,9 @@ void YapProxy::ioFunction(GIOChannel* channel, GIOCondition condition)
         m_server->handleSyncCommand(this, m_packetCommand, m_packetReply);
 
         pktLen = m_packetReply->length();
-        pktLen = bswap_16(pktLen);
-        ::memcpy(pktHeader, &pktLen, 2);
-        pktHeader[2] = pktFlags;
+        pktHeader[0] = (char)( pktLen        & 0xFF);
+        pktHeader[1] = (char)((pktLen >> 8)  & 0xFF);
+        pktHeader[2] = (char)((pktLen >> 16) & 0xFF);
         pktHeader[3] = 0;
 
         if (!writeSocket(m_cmdSocketFd, pktHeader, 4)) {
@@ -321,7 +332,7 @@ void YapProxy::ioFunction(GIOChannel* channel, GIOCondition condition)
         }
 
         if (m_packetReply->length() > 0) {
-            if (!writeSocket(m_cmdSocketFd, (char*) m_replyBuffer, m_packetReply->length())) {
+            if (!writeSocket(m_cmdSocketFd, (char*) m_packetReply->buffer(), m_packetReply->length())) {
                 goto Detached;
             }
         }

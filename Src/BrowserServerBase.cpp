@@ -586,8 +586,23 @@ void BrowserServerBase::handleAsyncCommand(YapProxy* proxy, YapPacket* cmd)
 		(*cmd) >> pointY;
 		
 		asyncCmdEnableSelection(proxy, pointX, pointY);
-		
-		
+
+
+		break;
+	}
+	case 0x1130: { // ExtendSelection (drag a marker to grow the selection)
+
+		int32_t whichEnd = 0;
+		int32_t pointX = 0;
+		int32_t pointY = 0;
+
+		(*cmd) >> whichEnd;
+		(*cmd) >> pointX;
+		(*cmd) >> pointY;
+
+		asyncCmdExtendSelection(proxy, whichEnd, pointX, pointY);
+
+
 		break;
 	}
 	case 0x111A: { // DisableSelection

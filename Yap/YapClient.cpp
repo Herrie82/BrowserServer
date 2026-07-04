@@ -59,10 +59,12 @@ public:
     GIOChannel*   msgIoChannel;
     GSource*      msgIoSource;
 
-    uint8_t*      msgBuffer;
-    uint8_t*      cmdBuffer;
-    uint8_t*      replyBuffer;
- 
+    uint8_t*      msgBuffer;    // growable receive buffer for async messages
+    uint8_t*      cmdBuffer;    // unused now: cmdPacket owns its growable write buffer
+    uint8_t*      replyBuffer;  // growable receive buffer for sync replies
+    int           msgBufCap;    // current allocation of msgBuffer
+    int           replyBufCap;  // current allocation of replyBuffer
+
     YapPacket*    msgPacket;
     YapPacket*    cmdPacket;
     YapPacket*    replyPacket;
@@ -83,6 +85,8 @@ public:
         , msgBuffer(0)
         , cmdBuffer(0)
         , replyBuffer(0)
+        , msgBufCap(0)
+        , replyBufCap(0)
         , msgPacket(0)
         , cmdPacket(0)
         , replyPacket(0) {;}
@@ -168,9 +172,9 @@ YapClient::~YapClient()
     delete d->cmdPacket;
     delete d->replyPacket;
 
-    delete[] d->msgBuffer;
-    delete[] d->cmdBuffer;
-    delete[] d->replyBuffer;
+    if (d->msgBuffer)   free(d->msgBuffer);    // malloc/realloc'd
+    if (d->replyBuffer) free(d->replyBuffer);
+    // d->cmdBuffer is unused (0); cmdPacket owned its own buffer, freed by its destructor above.
 
     delete d;
 
@@ -266,21 +270,22 @@ const char* YapClient::postfix() const
 bool YapClient::sendAsyncCommand()
 {
     char pktHeader[4] = { 0, 0, 0, 0 };
-    uint16_t pktLen = 0;
+    int  pktLen = d->cmdPacket->length();
 
-    if (d->cmdPacket->length() == 0) {
+    if (pktLen == 0) {
         fprintf(stderr, "Command is empty\n");
         return false;
     }
 
-    pktLen = d->cmdPacket->length();
-    pktLen = bswap_16(pktLen);
-    ::memset(pktHeader, 0, sizeof(pktHeader));
-    ::memcpy(pktHeader, &pktLen, 2);
+    // 24-bit little-endian length, flags 0.
+    pktHeader[0] = (char)( pktLen        & 0xFF);
+    pktHeader[1] = (char)((pktLen >> 8)  & 0xFF);
+    pktHeader[2] = (char)((pktLen >> 16) & 0xFF);
+    pktHeader[3] = 0;
 
     bool succeeded = writeSocket(d->cmdSocketFd, pktHeader, 4);
     if (succeeded) {
-        succeeded = writeSocket(d->cmdSocketFd, (char*) d->cmdBuffer, d->cmdPacket->length());
+        succeeded = writeSocket(d->cmdSocketFd, (char*) d->cmdPacket->buffer(), pktLen);
     }
 
     return succeeded;
@@ -289,44 +294,48 @@ bool YapClient::sendAsyncCommand()
 bool YapClient::sendSyncCommand()
 {
     char pktHeader[4] = { 0, 0, 0, 0 };
-    uint16_t pktLen;
-    char * ppp = 0;
+    uint32_t pktLen;
 
     if (d->cmdPacket->length() == 0) {
         fprintf(stderr, "Command is empty\n");
         return false;
     }
 
-    pktLen = 0;
-    ::memset(pktHeader, 0, sizeof(pktHeader));
-
+    // send: 24-bit little-endian length, sync flag in byte 3
     pktLen = d->cmdPacket->length();
-    pktLen = bswap_16(pktLen);
-    ::memcpy(pktHeader, &pktLen, 2);
+    pktHeader[0] = (char)( pktLen        & 0xFF);
+    pktHeader[1] = (char)((pktLen >> 8)  & 0xFF);
+    pktHeader[2] = (char)((pktLen >> 16) & 0xFF);
     pktHeader[3] = kPacketFlagSyncMask;
 
     if (!writeSocket(d->cmdSocketFd, pktHeader, 4))
         goto Detached;
 
-    if (!writeSocket(d->cmdSocketFd, (char*) d->cmdBuffer, d->cmdPacket->length()))
+    if (!writeSocket(d->cmdSocketFd, (char*) d->cmdPacket->buffer(), (int) pktLen))
         goto Detached;
 
 
-    pktLen = 0;
     ::memset(pktHeader, 0, sizeof(pktHeader));
 
     if (!readSocketSync(d->cmdSocketFd, pktHeader, 4))
         goto Detached;
 
-    ppp = ((char *)&pktHeader[0]);
-    pktLen   = *((uint16_t*) ppp);
-    pktLen   = bswap_16(pktLen);
-    if (pktLen > kMaxMsgLen) {
+    pktLen = (uint32_t)(uint8_t)pktHeader[0] | ((uint32_t)(uint8_t)pktHeader[1] << 8) | ((uint32_t)(uint8_t)pktHeader[2] << 16);
+    if (pktLen > (uint32_t)kMaxMsgLen) {
         fprintf(stderr, "YAP: Message too large %u > %u\n", pktLen, kMaxMsgLen);
         goto Detached;
     }
 
-    if (!readSocketSync(d->cmdSocketFd, (char*) d->replyBuffer, pktLen))
+    // grow the reply buffer if this reply is bigger than the current allocation
+    if ((int)pktLen > d->replyBufCap) {
+        uint8_t* nb = (uint8_t*) realloc(d->replyBuffer, pktLen);
+        if (!nb) { fprintf(stderr, "YAP: OOM growing reply buffer to %u\n", pktLen); goto Detached; }
+        d->replyBuffer = nb;
+        d->replyBufCap = (int) pktLen;
+        d->replyPacket->setReadBuffer(d->replyBuffer, pktLen);
+    }
+
+    if (!readSocketSync(d->cmdSocketFd, (char*) d->replyBuffer, (int) pktLen))
         goto Detached;
 
     d->replyPacket->reset();
@@ -375,12 +384,14 @@ void YapClient::init(const char* name)
     d->msgIoSource = 0;
 
 
-    d->msgBuffer = new uint8_t[kMaxMsgLen];
-    d->cmdBuffer = new uint8_t[kMaxMsgLen];
-    d->replyBuffer = new uint8_t[kMaxMsgLen];
+    // Receive buffers start small and grow on demand (see sendSyncCommand / ioCallback). The command write
+    // packet owns its own growable buffer, so d->cmdBuffer is no longer allocated.
+    d->msgBuffer   = (uint8_t*) malloc(kInitMsgLen);   d->msgBufCap   = kInitMsgLen;
+    d->cmdBuffer   = 0;
+    d->replyBuffer = (uint8_t*) malloc(kInitMsgLen);   d->replyBufCap = kInitMsgLen;
 
-    d->msgPacket = new YapPacket(d->msgBuffer, 0);
-    d->cmdPacket = new YapPacket(d->cmdBuffer);
+    d->msgPacket   = new YapPacket(d->msgBuffer, 0);
+    d->cmdPacket   = new YapPacket();
     d->replyPacket = new YapPacket(d->replyBuffer, 0);
 
     ::snprintf(d->cmdSocketPath, G_N_ELEMENTS(d->cmdSocketPath), "%s%s", kSocketPathPrefix, name);
@@ -467,8 +478,7 @@ void YapClient::ioCallback(GIOChannel* channel, GIOCondition condition)
     else if (channel == d->msgIoChannel) {
 
         char pktHeader[4] = { 0, 0, 0, 0 };
-        uint16_t pktLen = 0;
-        char * ppp = 0;
+        uint32_t pktLen = 0;
 
         // We either got a message or a server disconnect
         if (condition & G_IO_HUP)
@@ -480,13 +490,24 @@ void YapClient::ioCallback(GIOChannel* channel, GIOCondition condition)
             goto Detached;
         }
 
-        ppp = ((char *)&pktHeader[0]);
-        pktLen   = *((uint16_t*) ppp);
-        pktLen   = bswap_16(pktLen);
+        // 24-bit little-endian length in bytes 0..2.
+        pktLen = (uint32_t)(uint8_t)pktHeader[0] | ((uint32_t)(uint8_t)pktHeader[1] << 8) | ((uint32_t)(uint8_t)pktHeader[2] << 16);
 
-        if (pktLen > kMaxMsgLen) {
+        if (pktLen > (uint32_t)kMaxMsgLen) {
             fprintf(stderr, "YAP: ERROR packet length too large: %u > %d\n", pktLen, kMaxMsgLen);
             goto Detached;
+        }
+
+        // Grow the receive buffer if this message is bigger than the current allocation.
+        if ((int)pktLen > d->msgBufCap) {
+            uint8_t* nb = (uint8_t*) realloc(d->msgBuffer, pktLen);
+            if (!nb) {
+                fprintf(stderr, "YAP: OOM growing msg buffer to %u\n", pktLen);
+                goto Detached;
+            }
+            d->msgBuffer = nb;
+            d->msgBufCap = (int) pktLen;
+            d->msgPacket->setReadBuffer(d->msgBuffer, pktLen);
         }
 
         // Get the packet data

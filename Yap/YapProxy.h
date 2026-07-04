@@ -74,9 +74,10 @@ private:
     int         m_msgSocketFd;
     char*       m_msgSocketPostfix;
     void*       m_privData;
-    uint8_t*    m_cmdBuffer;
-    uint8_t*    m_replyBuffer;
-    uint8_t*    m_msgBuffer;
+    uint8_t*    m_cmdBuffer;    // growable receive buffer (malloc/realloc), starts at kInitMsgLen
+    int         m_cmdBufCap;    // current allocated size of m_cmdBuffer
+    uint8_t*    m_replyBuffer;  // unused now: m_packetReply owns its growable write buffer
+    uint8_t*    m_msgBuffer;    // unused now: m_packetMessage owns its growable write buffer
     GIOChannel* m_ioChannel;
     GSource*    m_ioSource;
 

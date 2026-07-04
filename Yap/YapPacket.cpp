@@ -38,22 +38,65 @@ typedef enum YapType_t {
     kYapTypeUInt16 = (1 << 7)
 } YapType_t;
 
-YapPacket::YapPacket(uint8_t* buffer)
-    : m_buffer(buffer)
+// Write packet: owns a growable heap buffer.
+YapPacket::YapPacket()
+    : m_buffer((uint8_t*) malloc(kInitMsgLen))
     , m_forWriting(true)
     , m_currReadPos(0)
     , m_readTotalLen(0)
     , m_currWritePos(0)
+    , m_capacity(kInitMsgLen)
+    , m_ownsBuffer(true)
 {
 }
 
+// Read packet: wraps an external buffer (owned by YapProxy/YapClient).
 YapPacket::YapPacket(uint8_t* buffer, int readTotalLen)
     : m_buffer(buffer)
     , m_forWriting(false)
     , m_currReadPos(0)
     , m_readTotalLen(readTotalLen)
     , m_currWritePos(0)
+    , m_capacity(0)
+    , m_ownsBuffer(false)
 {
+}
+
+YapPacket::~YapPacket()
+{
+    if (m_ownsBuffer && m_buffer)
+        free(m_buffer);
+}
+
+bool YapPacket::ensureCapacity(int extra)
+{
+    if (m_currWritePos + extra <= m_capacity)
+        return true;
+    if (!m_ownsBuffer)
+        return false;
+    int need = m_currWritePos + extra;
+    if (need > kMaxMsgLen) {
+        g_warning("YAP: message would exceed cap (%d > %d), dropping write", need, kMaxMsgLen);
+        return false;
+    }
+    int newCap = m_capacity > 0 ? m_capacity : kInitMsgLen;
+    while (newCap < need)
+        newCap <<= 1;
+    if (newCap > kMaxMsgLen)
+        newCap = kMaxMsgLen;
+    uint8_t* nb = (uint8_t*) realloc(m_buffer, newCap);
+    if (!nb)
+        return false;
+    m_buffer   = nb;
+    m_capacity = newCap;
+    return true;
+}
+
+void YapPacket::setReadBuffer(uint8_t* buffer, int totalLen)
+{
+    m_buffer       = buffer;
+    m_readTotalLen = totalLen;
+    m_currReadPos  = 0;
 }
 
 int YapPacket::length() const
@@ -66,7 +109,7 @@ int YapPacket::length() const
 
 void YapPacket::setReadTotalLength(int len)
 {
-    m_readTotalLen = len;    
+    m_readTotalLen = len;
 }
 
 void YapPacket::reset()
@@ -78,7 +121,7 @@ void YapPacket::reset()
 void YapPacket::operator<<(bool val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 2) <= kMaxMsgLen);
+    if (!ensureCapacity(2)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeBool;
     m_buffer[m_currWritePos++] = val;
@@ -87,7 +130,7 @@ void YapPacket::operator<<(bool val)
 void YapPacket::operator<<(int8_t val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 2) <= kMaxMsgLen);
+    if (!ensureCapacity(2)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeInt8;
     m_buffer[m_currWritePos++] = val;
@@ -96,7 +139,7 @@ void YapPacket::operator<<(int8_t val)
 void YapPacket::operator<<(int16_t val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 3) <= kMaxMsgLen);
+    if (!ensureCapacity(3)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeInt16;
 
@@ -111,7 +154,7 @@ void YapPacket::operator<<(int16_t val)
 void YapPacket::operator<<(uint16_t val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 3) <= kMaxMsgLen);
+    if (!ensureCapacity(3)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeUInt16;
 
@@ -126,7 +169,7 @@ void YapPacket::operator<<(uint16_t val)
 void YapPacket::operator<<(int32_t val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 5) <= kMaxMsgLen);
+    if (!ensureCapacity(5)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeInt32;
 
@@ -143,7 +186,7 @@ void YapPacket::operator<<(int32_t val)
 void YapPacket::operator<<(int64_t val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 9) <= kMaxMsgLen);
+    if (!ensureCapacity(9)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeInt64;
 
@@ -164,7 +207,7 @@ void YapPacket::operator<<(int64_t val)
 void YapPacket::operator<<(double val)
 {
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + 9) <= kMaxMsgLen);
+    if (!ensureCapacity(9)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeDouble;
 
@@ -187,16 +230,14 @@ void YapPacket::operator<<(const char* val)
     int strLen = val ? strlen(val) : 0;
 
     g_return_if_fail(m_forWriting);
-    g_return_if_fail((m_currWritePos + strLen + 3) <= kMaxMsgLen);
+    // type(1) + 24-bit length(3) + strLen. 24-bit length allows strings up to ~16MB (capped by kMaxMsgLen).
+    if (!ensureCapacity(strLen + 4)) return;
 
     m_buffer[m_currWritePos++] = kYapTypeString;
 
-    uint8_t* pSrc = (uint8_t*)(&strLen);
-    uint8_t* pDst = m_buffer + m_currWritePos;
-
-    pDst[0] = pSrc[1];
-    pDst[1] = pSrc[0];
-    m_currWritePos += 2;
+    m_buffer[m_currWritePos++] = (uint8_t)( strLen        & 0xFF);
+    m_buffer[m_currWritePos++] = (uint8_t)((strLen >> 8)  & 0xFF);
+    m_buffer[m_currWritePos++] = (uint8_t)((strLen >> 16) & 0xFF);
 
     if (strLen) {
         memcpy(m_buffer + m_currWritePos, val, strLen);
@@ -344,7 +385,8 @@ void YapPacket::operator>>(double& val)
 void YapPacket::operator>>(char*& val)
 {
     g_return_if_fail(!m_forWriting);
-    g_return_if_fail((m_currReadPos + 3) <= m_readTotalLen);
+    // type(1) + 24-bit length(3)
+    g_return_if_fail((m_currReadPos + 4) <= m_readTotalLen);
 
     YapType_t type = (YapType_t) m_buffer[m_currReadPos++];
     if (type != kYapTypeString) {
@@ -352,16 +394,11 @@ void YapPacket::operator>>(char*& val)
         g_return_if_fail(false);
     }
 
-    int16_t strLen = 0;
-
     uint8_t* pSrc = m_buffer + m_currReadPos;
-    uint8_t* pDst = (uint8_t*)(&strLen);
+    int strLen = (int)((uint32_t) pSrc[0] | ((uint32_t) pSrc[1] << 8) | ((uint32_t) pSrc[2] << 16));
+    m_currReadPos += 3;
 
-    pDst[0] = pSrc[1];
-    pDst[1] = pSrc[0];
-    m_currReadPos += 2;
-
-    g_return_if_fail((m_currReadPos + strLen) <= m_readTotalLen);
+    g_return_if_fail(strLen >= 0 && (m_currReadPos + strLen) <= m_readTotalLen);
     val = (char*) malloc(strLen + 1);
 
     memcpy(val, m_buffer + m_currReadPos, strLen);
