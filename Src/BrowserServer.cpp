@@ -1301,6 +1301,18 @@ BrowserServer::startService()
     if (!result)
         goto Exit;
     result = LSGmainAttach(m_service, mainLoop(), &lsError);
+    /* Second, ANONYMOUS (null-name) handle for the mediad handoff. mediad's media-resource policy accepts an
+     * anonymous/app caller (as luna-send -a / PalmServiceBridge do) but rejects a named system service, so the
+     * per-session load/play must go out on this handle. Our role allows the "" name. Non-fatal if it fails. */
+    if (result) {
+        LSError me; LSErrorInit(&me);
+        if (LSRegister(NULL, &m_mediaService, &me) && LSGmainAttach(m_mediaService, mainLoop(), &me)) {
+            g_message("startService: anonymous mediad handle up");
+        } else {
+            g_message("startService: anonymous mediad handle FAILED: %s", me.message ? me.message : "?");
+            LSErrorFree(&me); m_mediaService = 0;
+        }
+    }
 #else
     bool result = LSRegister("com.palm.browserServer", &m_service, &lsError);
     if (!result)

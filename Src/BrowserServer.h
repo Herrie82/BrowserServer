@@ -87,6 +87,11 @@ public:
 #ifdef USE_LUNA_SERVICE
     LSHandle* getServiceHandle() const { return m_service; }
 #endif //USE_LUNA_SERVICE
+#ifdef ATLAS_LUNA
+    /* Anonymous (null-name) handle for the mediad handoff — mimics luna-send/PalmServiceBridge, which
+     * mediad's media-resource policy accepts (a named system service is rejected). See mediadBegin. */
+    LSHandle* getMediaHandle() const { return m_mediaService ? m_mediaService : m_service; }
+#endif
     void shutdownBrowserServer();
 
 private:
@@ -106,6 +111,9 @@ private:
     LSHandle* m_service;
     LSMessageToken m_connectionManagerStatusToken;
 #endif //USE_LUNA_SERVICE
+#ifdef ATLAS_LUNA
+    LSHandle* m_mediaService = 0;   // anonymous handle for mediad calls (see getMediaHandle)
+#endif
     std::string m_ipAddress;
     WebKitEventListener* m_wkEventListener;
     std::string m_carrierCode;
