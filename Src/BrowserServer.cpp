@@ -303,11 +303,12 @@ BrowserServer::asyncCmdConnect(YapProxy* proxy, int32_t pageWidth, int32_t pageH
 
     } else {  // making a new BP
 
-#ifdef USE_LUNA_SERVICE
+#if defined(USE_LUNA_SERVICE) && !defined(ATLAS_LUNA)
         pPage = new BrowserPage(this, proxy, m_service);
 #else
+        /* Atlas WPE BrowserPage ctor takes no LSHandle — it fetches it via getServiceHandle() when needed. */
         pPage = new BrowserPage(this, proxy);
-#endif //USE_LUNA_SERVICE
+#endif
 
         if (pPage == NULL) {
             g_error("Failed to allocate Browser Page");
@@ -1289,6 +1290,18 @@ BrowserServer::startService()
     LSError lsError;
     LSErrorInit(&lsError);
 
+#ifdef ATLAS_LUNA
+    /* Atlas: register a DISTINCT service name — NEVER com.palm.browserServer (that's Palm's live BrowserServer,
+     * which we must not clash with). This handle exists only so BrowserServer-atlas can drive com.palm.mediad
+     * for the fullscreen-video HW-overlay handoff (BrowserPage::mediadBegin). BS<->adapter comms are Yap, not
+     * luna, so no service category is registered; the QtWebKit-only BackupManager/WebKitEventListener and the
+     * prefs/MSM/connectionManager subscriptions are skipped. Requires role file
+     * /var/palm/ls2/roles/prv/org.webosports.browserserver.json (outbound to com.palm.mediad + appId forge). */
+    bool result = LSRegister("org.webosports.browserserver", &m_service, &lsError);
+    if (!result)
+        goto Exit;
+    result = LSGmainAttach(m_service, mainLoop(), &lsError);
+#else
     bool result = LSRegister("com.palm.browserServer", &m_service, &lsError);
     if (!result)
         goto Exit;
@@ -1310,6 +1323,7 @@ BrowserServer::startService()
         connectToMSMService();
         registerForConnectionManager();
     }
+#endif // ATLAS_LUNA
 
 Exit:
     if (!result) {
