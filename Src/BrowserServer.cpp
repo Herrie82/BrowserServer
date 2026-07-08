@@ -813,9 +813,20 @@ void BrowserServer::asyncCmdSetBlockPopups(YapProxy* proxy, bool block)
     page->settingsPopupsEnabled(!block);  // webkit uses "can open", inverse of blocked
 }
 
-void BrowserServer::asyncCmdSetAcceptCookies(YapProxy* proxy, bool enable) 
+void BrowserServer::asyncCmdSetAcceptCookies(YapProxy* proxy, bool enable)
 {
     if (m_cookieJar) m_cookieJar->enableCookies(enable);   /* WPE: WebKit owns cookie policy */
+}
+
+void BrowserServer::asyncCmdSetAutoplayWithSound(YapProxy* proxy, bool enable)
+{
+    // Atlas: "Allow autoplay with sound" preference -> relax the unmuted-audio autoplay gesture requirement.
+    BrowserPage* page = static_cast<BrowserPage*>(proxy->privateData());
+    if (!page) {
+        BERR("autoplay-with-sound: No page for this client.");
+        return;
+    }
+    page->settingsAutoplayWithSound(enable);
 }
 
 void BrowserServer::asyncCmdSetShowClickedLink(YapProxy* proxy, bool enable) 

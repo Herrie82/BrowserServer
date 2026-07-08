@@ -411,8 +411,19 @@ void BrowserServerBase::handleAsyncCommand(YapProxy* proxy, YapPacket* cmd)
 		(*cmd) >> enable;
 		
 		asyncCmdSetAcceptCookies(proxy, enable);
-		
-		
+
+
+		break;
+	}
+	case 0x1131: { // SetAutoplayWithSound
+
+		bool enable = 0;
+
+		(*cmd) >> enable;
+
+		asyncCmdSetAutoplayWithSound(proxy, enable);
+
+
 		break;
 	}
 	case 0x110C: { // MouseEvent

@@ -186,6 +186,7 @@ private:
     virtual void asyncCmdSetEnableJavaScript(YapProxy* proxy, bool enable);
     virtual void asyncCmdSetBlockPopups(YapProxy* proxy, bool enable);
     virtual void asyncCmdSetAcceptCookies(YapProxy* proxy, bool enable);
+    virtual void asyncCmdSetAutoplayWithSound(YapProxy* proxy, bool enable);
     virtual void asyncCmdSetShowClickedLink(YapProxy* proxy, bool enable);
     virtual void asyncCmdMouseEvent(YapProxy* proxy, int32_t type, int32_t contentX, int32_t contentY, int32_t detail);
     virtual void asyncCmdGestureEvent(YapProxy* proxy, int32_t type, int32_t contentX, int32_t contentY, double scale, double rotate, int32_t centerX, int32_t centerY);
